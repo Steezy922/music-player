@@ -1,26 +1,27 @@
 const audioEl = new Audio();
-audioEl.crossOrigin = "anonymous";
 audioEl.volume = 0.8;
-
-// Allow playbackRate to naturally shift pitch like vinyl/tape
 audioEl.preservesPitch = false;
 audioEl.mozPreservesPitch = false;
 audioEl.webkitPreservesPitch = false;
 
-let playlistData = [
-  { name: "Sample Chill Beat.ogg", url: "https://google.com" }
-];
-
+let playlistData = [];
 let currentIndex = 0;
 let isShuffle = false;
+let loopMode = "all"; // "all" | "one" | "off"
 let isSeeking = false;
 let previousVolume = 0.8;
-let audioCtx, sourceNode, bassFilter, compressor, analyser, dataArray;
+
+let audioCtx, sourceNode, bassFilter, compressor, analyser, freqData, waveData;
 
 const playlistEl = document.getElementById("playlist");
 const playPauseBtn = document.getElementById("playPauseBtn");
+const prevBtn = document.getElementById("prevBtn");
+const nextBtn = document.getElementById("nextBtn");
 const shuffleBtn = document.getElementById("shuffleBtn");
+const loopBtn = document.getElementById("loopBtn");
 const randomBtn = document.getElementById("randomBtn");
+const clearAllBtn = document.getElementById("clearAllBtn");
+const vizModeSelect = document.getElementById("vizModeSelect");
 
 const seekSlider = document.getElementById("seekSlider");
 const currentTimeEl = document.getElementById("currentTime");
@@ -30,6 +31,7 @@ const bassSlider = document.getElementById("bassSlider");
 const bassValue = document.getElementById("bassValue");
 const speedSlider = document.getElementById("speedSlider");
 const speedValue = document.getElementById("speedValue");
+const resetSpeedBtn = document.getElementById("resetSpeedBtn");
 const volumeSlider = document.getElementById("volumeSlider");
 const volumeValue = document.getElementById("volumeValue");
 const muteBtn = document.getElementById("muteBtn");
@@ -38,7 +40,6 @@ const nowPlayingTitle = document.getElementById("nowPlayingTitle");
 const nowPlayingSub = document.getElementById("nowPlayingSub");
 const fileInput = document.getElementById("fileInput");
 
-// Format seconds into M:SS
 function formatTime(seconds) {
   if (isNaN(seconds) || !isFinite(seconds)) return "0:00";
   const mins = Math.floor(seconds / 60);
@@ -46,7 +47,6 @@ function formatTime(seconds) {
   return `${mins}:${secs < 10 ? "0" : ""}${secs}`;
 }
 
-// Initialize Web Audio API graph
 function initAudioContext() {
   if (audioCtx) return;
   const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -54,13 +54,11 @@ function initAudioContext() {
 
   sourceNode = audioCtx.createMediaElementSource(audioEl);
 
-  // Punchy LowShelf Bass Boost filter
   bassFilter = audioCtx.createBiquadFilter();
   bassFilter.type = "lowshelf";
   bassFilter.frequency.value = 100;
   bassFilter.gain.value = parseFloat(bassSlider.value);
 
-  // Dynamics compressor prevents distortion when bass is cranked up
   compressor = audioCtx.createDynamicsCompressor();
   compressor.threshold.value = -12;
   compressor.knee.value = 15;
@@ -68,11 +66,11 @@ function initAudioContext() {
   compressor.attack.value = 0.005;
   compressor.release.value = 0.15;
 
-  // Analyser for visualizer
   analyser = audioCtx.createAnalyser();
-  analyser.fftSize = 128;
+  analyser.fftSize = 256;
   const bufferLength = analyser.frequencyBinCount;
-  dataArray = new Uint8Array(bufferLength);
+  freqData = new Uint8Array(bufferLength);
+  waveData = new Uint8Array(bufferLength);
 
   sourceNode.connect(bassFilter);
   bassFilter.connect(compressor);
@@ -80,7 +78,6 @@ function initAudioContext() {
   analyser.connect(audioCtx.destination);
 }
 
-// Render Playlist
 function renderPlaylist() {
   playlistEl.innerHTML = "";
   playlistData.forEach((track, index) => {
@@ -91,9 +88,7 @@ function renderPlaylist() {
 
     li.innerHTML = `
       <span class="song-title" title="${track.name}">${index + 1}. ${track.name}</span>
-      <div class="song-actions">
-        <button class="icon-btn delete-btn" title="Delete Song">✕</button>
-      </div>
+      <button class="icon-btn delete-btn" title="Delete Song">✕</button>
     `;
     li.addEventListener("click", (e) => {
       if (e.target.classList.contains("delete-btn")) return;
@@ -104,7 +99,6 @@ function renderPlaylist() {
       deleteTrack(index);
     });
 
-    // Drag and drop ordering
     li.addEventListener("dragstart", (e) => {
       e.dataTransfer.setData("text/plain", index);
       li.classList.add("dragging");
@@ -132,6 +126,7 @@ function renderPlaylist() {
 }
 
 function playTrack(index) {
+  if (playlistData.length === 0) return;
   initAudioContext();
   if (audioCtx.state === "suspended") audioCtx.resume();
 
@@ -146,40 +141,49 @@ function playTrack(index) {
   renderPlaylist();
 }
 
+function resetPlayerUI() {
+  audioEl.pause();
+  audioEl.removeAttribute("src");
+  audioEl.load();
+  seekSlider.value = 0;
+  seekSlider.max = 100;
+  currentTimeEl.textContent = "0:00";
+  totalDurationEl.textContent = "0:00";
+  nowPlayingTitle.textContent = "No Track Loaded";
+  nowPlayingSub.textContent = 'Click "+ Add Songs" to load local audio';
+  playPauseBtn.textContent = "Play";
+  currentIndex = 0;
+}
+
 function deleteTrack(index) {
+  URL.revokeObjectURL(playlistData[index].url);
   playlistData.splice(index, 1);
   if (playlistData.length === 0) {
-    audioEl.pause();
-    audioEl.src = "";
-    seekSlider.value = 0;
-    currentTimeEl.textContent = "0:00";
-    totalDurationEl.textContent = "0:00";
-    nowPlayingTitle.textContent = "No Track Loaded";
-    nowPlayingSub.textContent = "Add or select local songs";
-    playPauseBtn.textContent = "Play";
-    currentIndex = 0;
-  } else {
-    if (index === currentIndex) {
-      currentIndex = Math.min(index, playlistData.length - 1);
-      playTrack(currentIndex);
-    } else if (index < currentIndex) {
-      currentIndex--;
-    }
+    resetPlayerUI();
+  } else if (index === currentIndex) {
+    currentIndex = Math.min(index, playlistData.length - 1);
+    playTrack(currentIndex);
+  } else if (index < currentIndex) {
+    currentIndex--;
   }
   renderPlaylist();
 }
 
-// Play / Pause Toggle
+clearAllBtn.addEventListener("click", () => {
+  playlistData.forEach((t) => URL.revokeObjectURL(t.url));
+  playlistData = [];
+  resetPlayerUI();
+  renderPlaylist();
+});
+
 playPauseBtn.addEventListener("click", () => {
+  if (playlistData.length === 0) return;
   initAudioContext();
   if (audioCtx.state === "suspended") audioCtx.resume();
 
-  if (playlistData.length === 0) return;
-
   if (audioEl.paused) {
-    if (!audioEl.src) {
-      playTrack(currentIndex);
-    } else {
+    if (!audioEl.src) playTrack(currentIndex);
+    else {
       audioEl.play();
       playPauseBtn.textContent = "Pause";
     }
@@ -188,34 +192,64 @@ playPauseBtn.addEventListener("click", () => {
     playPauseBtn.textContent = "Play";
   }
 });
-// Timeline & Seeking Controls
+prevBtn.addEventListener("click", () => {
+  if (playlistData.length === 0) return;
+  if (audioEl.currentTime > 3) {
+    audioEl.currentTime = 0;
+    return;
+  }
+  currentIndex = (currentIndex - 1 + playlistData.length) % playlistData.length;
+  playTrack(currentIndex);
+});
+
+nextBtn.addEventListener("click", () => {
+  if (playlistData.length === 0) return;
+  if (isShuffle) playRandomTrack();
+  else {
+    currentIndex = (currentIndex + 1) % playlistData.length;
+    playTrack(currentIndex);
+  }
+});
+
+// Seeking & Timeline Scrubber
 audioEl.addEventListener("loadedmetadata", () => {
-  seekSlider.max = audioEl.duration;
-  totalDurationEl.textContent = formatTime(audioEl.duration);
+  if (isFinite(audioEl.duration)) {
+    seekSlider.max = audioEl.duration;
+    totalDurationEl.textContent = formatTime(audioEl.duration);
+  }
+});
+
+audioEl.addEventListener("durationchange", () => {
+  if (isFinite(audioEl.duration)) {
+    seekSlider.max = audioEl.duration;
+    totalDurationEl.textContent = formatTime(audioEl.duration);
+  }
 });
 
 audioEl.addEventListener("timeupdate", () => {
-  if (!isSeeking) {
+  if (!isSeeking && isFinite(audioEl.duration)) {
+    seekSlider.max = audioEl.duration;
     seekSlider.value = audioEl.currentTime;
     currentTimeEl.textContent = formatTime(audioEl.currentTime);
   }
 });
 
-seekSlider.addEventListener("mousedown", () => {
-  isSeeking = true;
-});
-
-seekSlider.addEventListener("touchstart", () => {
+seekSlider.addEventListener("pointerdown", () => {
   isSeeking = true;
 });
 
 seekSlider.addEventListener("input", () => {
-  currentTimeEl.textContent = formatTime(seekSlider.value);
+  const targetTime = parseFloat(seekSlider.value);
+  currentTimeEl.textContent = formatTime(targetTime);
+  if (isFinite(audioEl.duration)) {
+    audioEl.currentTime = targetTime;
+  }
 });
 
-seekSlider.addEventListener("change", () => {
-  audioEl.currentTime = seekSlider.value;
-  isSeeking = false;
+window.addEventListener("pointerup", () => {
+  if (isSeeking) {
+    isSeeking = false;
+  }
 });
 
 // Volume & Mute Controls
@@ -241,21 +275,37 @@ muteBtn.addEventListener("click", () => {
   }
 });
 
-// Next / Shuffle track on end
 audioEl.addEventListener("ended", () => {
-  if (isShuffle) {
+  if (loopMode === "one") {
+    audioEl.currentTime = 0;
+    audioEl.play();
+  } else if (isShuffle) {
     playRandomTrack();
+  } else if (currentIndex < playlistData.length - 1) {
+    playTrack(currentIndex + 1);
+  } else if (loopMode === "all") {
+    playTrack(0);
   } else {
-    currentIndex = (currentIndex + 1) % playlistData.length;
-    playTrack(currentIndex);
+    playPauseBtn.textContent = "Play";
   }
 });
-
-// Shuffle toggle
 shuffleBtn.addEventListener("click", () => {
   isShuffle = !isShuffle;
   shuffleBtn.classList.toggle("active", isShuffle);
   shuffleBtn.textContent = `Shuffle: ${isShuffle ? "On" : "Off"}`;
+});
+
+loopBtn.addEventListener("click", () => {
+  if (loopMode === "all") {
+    loopMode = "one";
+    loopBtn.textContent = "Loop: One";
+  } else if (loopMode === "one") {
+    loopMode = "off";
+    loopBtn.textContent = "Loop: Off";
+  } else {
+    loopMode = "all";
+    loopBtn.textContent = "Loop: All";
+  }
 });
 
 function playRandomTrack() {
@@ -267,66 +317,136 @@ function playRandomTrack() {
   playTrack(nextIdx);
 }
 
-randomBtn.addEventListener("click", () => {
-  playRandomTrack();
-});
+randomBtn.addEventListener("click", playRandomTrack);
 
-// Bass Boost Slider
 bassSlider.addEventListener("input", (e) => {
   const val = parseFloat(e.target.value);
   bassValue.textContent = `${val} dB`;
-  if (bassFilter) {
-    bassFilter.gain.setValueAtTime(val, audioCtx.currentTime);
-  }
+  if (bassFilter) bassFilter.gain.setValueAtTime(val, audioCtx.currentTime);
 });
 
-// Speed / Pitch Slider
 speedSlider.addEventListener("input", (e) => {
   const val = parseFloat(e.target.value);
   speedValue.textContent = `${val.toFixed(2)}x`;
   audioEl.playbackRate = val;
 });
 
-// Add local files
-fileInput.addEventListener("change", (e) => {
-  const files = Array.from(e.target.files);
-  files.forEach((file) => {
-    const objectUrl = URL.createObjectURL(file);
-    playlistData.push({ name: file.name, url: objectUrl });
-  });
-  renderPlaylist();
+resetSpeedBtn.addEventListener("click", () => {
+  speedSlider.value = 1.0;
+  speedValue.textContent = "1.00x";
+  audioEl.playbackRate = 1.0;
 });
 
-// Visualizer Canvas loop
+fileInput.addEventListener("change", (e) => {
+  const files = Array.from(e.target.files);
+  const wasEmpty = playlistData.length === 0;
+  files.forEach((file) => {
+    playlistData.push({ name: file.name, url: URL.createObjectURL(file) });
+  });
+  renderPlaylist();
+  if (wasEmpty && playlistData.length > 0) playTrack(0);
+});
+
+// Keyboard Shortcuts (Space = Play/Pause, Arrows = Seek +/- 5s)
+window.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+  if (e.code === "Space") {
+    e.preventDefault();
+    playPauseBtn.click();
+  } else if (e.code === "ArrowRight" && isFinite(audioEl.duration)) {
+    audioEl.currentTime = Math.min(audioEl.duration, audioEl.currentTime + 5);
+  } else if (e.code === "ArrowLeft" && isFinite(audioEl.duration)) {
+    audioEl.currentTime = Math.max(0, audioEl.currentTime - 5);
+  }
+});
+
+// Multi-Mode Visualizer Engine
 const canvas = document.getElementById("visualizer");
 const canvasCtx = canvas.getContext("2d");
+const specCanvas = document.createElement("canvas");
+const specCtx = specCanvas.getContext("2d");
+
+function resizeCanvases() {
+  if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
+    canvas.width = canvas.clientWidth;
+    canvas.height = canvas.clientHeight;
+    specCanvas.width = canvas.width;
+    specCanvas.height = canvas.height;
+    specCtx.fillStyle = "#10121a";
+    specCtx.fillRect(0, 0, specCanvas.width, specCanvas.height);
+  }
+}
 
 function drawVisualizer() {
   requestAnimationFrame(drawVisualizer);
-  canvas.width = canvas.clientWidth;
-  canvas.height = canvas.clientHeight;
+  resizeCanvases();
+  const mode = vizModeSelect.value;
 
-  canvasCtx.fillStyle = "#161822";
-  canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+  if (!analyser) {
+    canvasCtx.fillStyle = "#10121a";
+    canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+    return;
+  }
 
-  if (!analyser) return;
-
-  analyser.getByteFrequencyData(dataArray);
-
-  const barWidth = (canvas.width / dataArray.length) * 2.2;
-  let x = 0;
-
-  for (let i = 0; i < dataArray.length; i++) {
-    const barHeight = (dataArray[i] / 255) * canvas.height;
-
-    const gradient = canvasCtx.createLinearGradient(0, canvas.height - barHeight, 0, canvas.height);
-    gradient.addColorStop(0, "#b388ff");
-    gradient.addColorStop(1, "#7c4dff");
-
-    canvasCtx.fillStyle = gradient;
-    canvasCtx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
-
-    x += barWidth + 2;
+  if (mode === "bars") {
+    canvasCtx.fillStyle = "#10121a";
+    canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+    analyser.getByteFrequencyData(freqData);
+    const barWidth = (canvas.width / freqData.length) * 2.2;
+    let x = 0;
+    for (let i = 0; i < freqData.length; i++) {
+      const barHeight = (freqData[i] / 255) * canvas.height;
+      const grad = canvasCtx.createLinearGradient(0, canvas.height - barHeight, 0, canvas.height);
+      grad.addColorStop(0, "#b388ff");
+      grad.addColorStop(1, "#7c4dff");
+      canvasCtx.fillStyle = grad;
+      canvasCtx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+      x += barWidth + 2;
+    }
+  } else if (mode === "mirror") {
+    canvasCtx.fillStyle = "#10121a";
+    canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+    analyser.getByteFrequencyData(freqData);
+    const barWidth = (canvas.width / freqData.length) * 2.2;
+    const midY = canvas.height / 2;
+    let x = 0;
+    for (let i = 0; i < freqData.length; i++) {
+      const halfH = ((freqData[i] / 255) * canvas.height) / 2;
+      canvasCtx.fillStyle = `hsl(${255 + (freqData[i] / 255) * 45}, 85%, 65%)`;
+      canvasCtx.fillRect(x, midY - halfH, barWidth, halfH * 2);
+      x += barWidth + 2;
+    }
+  } else if (mode === "wave") {
+    canvasCtx.fillStyle = "#10121a";
+    canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+    analyser.getByteTimeDomainData(waveData);
+    canvasCtx.lineWidth = 2.5;
+    canvasCtx.strokeStyle = "#b388ff";
+    canvasCtx.beginPath();
+    const sliceWidth = canvas.width / waveData.length;
+    let x = 0;
+    for (let i = 0; i < waveData.length; i++) {
+      const v = waveData[i] / 128.0;
+      const y = (v * canvas.height) / 2;
+      if (i === 0) canvasCtx.moveTo(x, y);
+      else canvasCtx.lineTo(x, y);
+      x += sliceWidth;
+    }
+    canvasCtx.lineTo(canvas.width, canvas.height / 2);
+    canvasCtx.stroke();
+  } else if (mode === "spectrogram") {
+    analyser.getByteFrequencyData(freqData);
+    specCtx.drawImage(specCanvas, -2, 0);
+    const sliceH = canvas.height / freqData.length;
+    for (let i = 0; i < freqData.length; i++) {
+      const val = freqData[i];
+      const hue = 275 - (val / 255) * 240;
+      const light = (val / 255) * 60;
+      specCtx.fillStyle = `hsl(${hue}, 90%, ${light}%)`;
+      const y = canvas.height - (i + 1) * sliceH;
+      specCtx.fillRect(specCanvas.width - 2, y, 2, Math.ceil(sliceH));
+    }
+    canvasCtx.drawImage(specCanvas, 0, 0);
   }
 }
 
