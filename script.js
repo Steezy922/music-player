@@ -1,24 +1,50 @@
 const audioEl = new Audio();
+audioEl.crossOrigin = "anonymous";
+audioEl.volume = 0.8;
+
+// Allow playbackRate to naturally shift pitch like vinyl/tape
+audioEl.preservesPitch = false;
+audioEl.mozPreservesPitch = false;
+audioEl.webkitPreservesPitch = false;
+
 let playlistData = [
-  // Example initial local track references (you can replace or add via "+ Add Songs")
-  { name: "Sample Synthwave.mp3", url: "https://google.com" }
+  { name: "Sample Chill Beat.ogg", url: "https://google.com" }
 ];
 
 let currentIndex = 0;
 let isShuffle = false;
-let audioCtx, sourceNode, bassFilter, analyser, dataArray;
+let isSeeking = false;
+let previousVolume = 0.8;
+let audioCtx, sourceNode, bassFilter, compressor, analyser, dataArray;
 
 const playlistEl = document.getElementById("playlist");
 const playPauseBtn = document.getElementById("playPauseBtn");
 const shuffleBtn = document.getElementById("shuffleBtn");
 const randomBtn = document.getElementById("randomBtn");
+
+const seekSlider = document.getElementById("seekSlider");
+const currentTimeEl = document.getElementById("currentTime");
+const totalDurationEl = document.getElementById("totalDuration");
+
 const bassSlider = document.getElementById("bassSlider");
 const bassValue = document.getElementById("bassValue");
 const speedSlider = document.getElementById("speedSlider");
 const speedValue = document.getElementById("speedValue");
+const volumeSlider = document.getElementById("volumeSlider");
+const volumeValue = document.getElementById("volumeValue");
+const muteBtn = document.getElementById("muteBtn");
+
 const nowPlayingTitle = document.getElementById("nowPlayingTitle");
 const nowPlayingSub = document.getElementById("nowPlayingSub");
 const fileInput = document.getElementById("fileInput");
+
+// Format seconds into M:SS
+function formatTime(seconds) {
+  if (isNaN(seconds) || !isFinite(seconds)) return "0:00";
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs < 10 ? "0" : ""}${secs}`;
+}
 
 // Initialize Web Audio API graph
 function initAudioContext() {
@@ -28,11 +54,19 @@ function initAudioContext() {
 
   sourceNode = audioCtx.createMediaElementSource(audioEl);
 
-  // Real LowShelf Bass Boost filter for punchy low-end
+  // Punchy LowShelf Bass Boost filter
   bassFilter = audioCtx.createBiquadFilter();
   bassFilter.type = "lowshelf";
-  bassFilter.frequency.value = 110;
+  bassFilter.frequency.value = 100;
   bassFilter.gain.value = parseFloat(bassSlider.value);
+
+  // Dynamics compressor prevents distortion when bass is cranked up
+  compressor = audioCtx.createDynamicsCompressor();
+  compressor.threshold.value = -12;
+  compressor.knee.value = 15;
+  compressor.ratio.value = 8;
+  compressor.attack.value = 0.005;
+  compressor.release.value = 0.15;
 
   // Analyser for visualizer
   analyser = audioCtx.createAnalyser();
@@ -41,7 +75,8 @@ function initAudioContext() {
   dataArray = new Uint8Array(bufferLength);
 
   sourceNode.connect(bassFilter);
-  bassFilter.connect(analyser);
+  bassFilter.connect(compressor);
+  compressor.connect(analyser);
   analyser.connect(audioCtx.destination);
 }
 
@@ -60,7 +95,6 @@ function renderPlaylist() {
         <button class="icon-btn delete-btn" title="Delete Song">✕</button>
       </div>
     `;
-
     li.addEventListener("click", (e) => {
       if (e.target.classList.contains("delete-btn")) return;
       playTrack(index);
@@ -83,8 +117,8 @@ function renderPlaylist() {
     li.addEventListener("dragover", (e) => {
       e.preventDefault();
       const draggingIdx = parseInt(e.dataTransfer.getData("text/plain"));
-      if (draggingIdx !== index) {
-        const movedItem = playlistData.splice(draggingIdx, 1)[0];
+      if (!isNaN(draggingIdx) && draggingIdx !== index) {
+        const [movedItem] = playlistData.splice(draggingIdx, 1);
         playlistData.splice(index, 0, movedItem);
         if (currentIndex === draggingIdx) currentIndex = index;
         else if (draggingIdx < currentIndex && index >= currentIndex) currentIndex--;
@@ -117,6 +151,9 @@ function deleteTrack(index) {
   if (playlistData.length === 0) {
     audioEl.pause();
     audioEl.src = "";
+    seekSlider.value = 0;
+    currentTimeEl.textContent = "0:00";
+    totalDurationEl.textContent = "0:00";
     nowPlayingTitle.textContent = "No Track Loaded";
     nowPlayingSub.textContent = "Add or select local songs";
     playPauseBtn.textContent = "Play";
@@ -132,7 +169,7 @@ function deleteTrack(index) {
   renderPlaylist();
 }
 
-// Play/Pause
+// Play / Pause Toggle
 playPauseBtn.addEventListener("click", () => {
   initAudioContext();
   if (audioCtx.state === "suspended") audioCtx.resume();
@@ -140,18 +177,73 @@ playPauseBtn.addEventListener("click", () => {
   if (playlistData.length === 0) return;
 
   if (audioEl.paused) {
-    if (!audioEl.src) playTrack(currentIndex);
-    else audioEl.play();
-    playPauseBtn.textContent = "Pause";
+    if (!audioEl.src) {
+      playTrack(currentIndex);
+    } else {
+      audioEl.play();
+      playPauseBtn.textContent = "Pause";
+    }
   } else {
     audioEl.pause();
     playPauseBtn.textContent = "Play";
   }
 });
+// Timeline & Seeking Controls
+audioEl.addEventListener("loadedmetadata", () => {
+  seekSlider.max = audioEl.duration;
+  totalDurationEl.textContent = formatTime(audioEl.duration);
+});
+
+audioEl.addEventListener("timeupdate", () => {
+  if (!isSeeking) {
+    seekSlider.value = audioEl.currentTime;
+    currentTimeEl.textContent = formatTime(audioEl.currentTime);
+  }
+});
+
+seekSlider.addEventListener("mousedown", () => {
+  isSeeking = true;
+});
+
+seekSlider.addEventListener("touchstart", () => {
+  isSeeking = true;
+});
+
+seekSlider.addEventListener("input", () => {
+  currentTimeEl.textContent = formatTime(seekSlider.value);
+});
+
+seekSlider.addEventListener("change", () => {
+  audioEl.currentTime = seekSlider.value;
+  isSeeking = false;
+});
+
+// Volume & Mute Controls
+volumeSlider.addEventListener("input", (e) => {
+  const vol = parseFloat(e.target.value);
+  audioEl.volume = vol;
+  volumeValue.textContent = `${Math.round(vol * 100)}%`;
+  muteBtn.textContent = vol === 0 ? "(Unmute)" : "(Mute)";
+});
+
+muteBtn.addEventListener("click", () => {
+  if (audioEl.volume > 0) {
+    previousVolume = audioEl.volume;
+    audioEl.volume = 0;
+    volumeSlider.value = 0;
+    volumeValue.textContent = "0%";
+    muteBtn.textContent = "(Unmute)";
+  } else {
+    audioEl.volume = previousVolume || 0.8;
+    volumeSlider.value = audioEl.volume;
+    volumeValue.textContent = `${Math.round(audioEl.volume * 100)}%`;
+    muteBtn.textContent = "(Mute)";
+  }
+});
 
 // Next / Shuffle track on end
 audioEl.addEventListener("ended", () => {
-  if (isShuffle || randomBtn.dataset.randomMode === "true") {
+  if (isShuffle) {
     playRandomTrack();
   } else {
     currentIndex = (currentIndex + 1) % playlistData.length;
@@ -168,7 +260,10 @@ shuffleBtn.addEventListener("click", () => {
 
 function playRandomTrack() {
   if (playlistData.length === 0) return;
-  const nextIdx = Math.floor(Math.random() * playlistData.length);
+  let nextIdx = Math.floor(Math.random() * playlistData.length);
+  if (playlistData.length > 1 && nextIdx === currentIndex) {
+    nextIdx = (nextIdx + 1) % playlistData.length;
+  }
   playTrack(nextIdx);
 }
 
@@ -178,7 +273,7 @@ randomBtn.addEventListener("click", () => {
 
 // Bass Boost Slider
 bassSlider.addEventListener("input", (e) => {
-  const val = e.target.value;
+  const val = parseFloat(e.target.value);
   bassValue.textContent = `${val} dB`;
   if (bassFilter) {
     bassFilter.gain.setValueAtTime(val, audioCtx.currentTime);
@@ -211,16 +306,12 @@ function drawVisualizer() {
   canvas.width = canvas.clientWidth;
   canvas.height = canvas.clientHeight;
 
-  if (!analyser) {
-    canvasCtx.fillStyle = "#161822";
-    canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
-    return;
-  }
-
-  analyser.getByteFrequencyData(dataArray);
-
   canvasCtx.fillStyle = "#161822";
   canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+  if (!analyser) return;
+
+  analyser.getByteFrequencyData(dataArray);
 
   const barWidth = (canvas.width / dataArray.length) * 2.2;
   let x = 0;
