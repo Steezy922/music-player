@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Chill Local Music Player</title>
+  <title>Steezy's LS Music Player</title>
   <style>
     :root {
       --bg: #12131c;
@@ -35,14 +35,14 @@
 
     .player-container {
       width: 100%;
-      max-width: 820px;
+      max-width: 860px;
       background: var(--card);
       border-radius: 20px;
       box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
       border: 1px solid rgba(255, 255, 255, 0.08);
       overflow: hidden;
       display: grid;
-      grid-template-columns: 1.1fr 1fr;
+      grid-template-columns: 1.15fr 1fr;
     }
 
     @media (max-width: 768px) {
@@ -64,6 +64,9 @@
       font-size: 1.25rem;
       font-weight: 600;
       letter-spacing: -0.02em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .header-info p {
@@ -74,8 +77,8 @@
 
     .canvas-wrap {
       width: 100%;
-      height: 180px;
-      margin: 18px 0;
+      height: 150px;
+      margin: 16px 0;
       background: rgba(0, 0, 0, 0.3);
       border-radius: 12px;
       overflow: hidden;
@@ -91,31 +94,73 @@
     .controls-panel {
       display: flex;
       flex-direction: column;
-      gap: 14px;
+      gap: 12px;
+    }
+
+    /* Seek Bar Styling */
+    .seek-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .time-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .slider-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
     }
 
     .slider-group {
       background: rgba(255, 255, 255, 0.03);
-      padding: 10px 14px;
+      padding: 10px 12px;
       border-radius: 10px;
       display: flex;
       flex-direction: column;
       gap: 6px;
     }
 
+    .slider-group.full-width {
+      grid-column: span 2;
+    }
+
     .slider-label {
       display: flex;
       justify-content: space-between;
-      font-size: 0.75rem;
+      align-items: center;
+      font-size: 0.72rem;
       color: var(--text-muted);
       text-transform: uppercase;
       letter-spacing: 0.05em;
+    }
+
+    .mute-toggle {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      padding: 0;
+      font-size: 0.75rem;
+      cursor: pointer;
+    }
+
+    .mute-toggle:hover {
+      background: none;
+      box-shadow: none;
+      color: var(--accent);
     }
 
     input[type="range"] {
       width: 100%;
       accent-color: var(--accent);
       cursor: pointer;
+      height: 5px;
     }
 
     .btn-row {
@@ -123,18 +168,20 @@
       align-items: center;
       justify-content: space-between;
       gap: 8px;
+      margin-top: 4px;
     }
 
     button {
       background: var(--card-hover);
       color: var(--text);
       border: 1px solid rgba(255, 255, 255, 0.1);
-      padding: 10px 16px;
+      padding: 10px 14px;
       border-radius: 10px;
       cursor: pointer;
       font-weight: 500;
       font-size: 0.85rem;
       transition: all 0.2s ease;
+      flex: 1;
     }
 
     button:hover {
@@ -175,6 +222,11 @@
       font-size: 0.75rem;
       cursor: pointer;
       font-weight: 600;
+      transition: opacity 0.2s;
+    }
+
+    .add-file-label:hover {
+      opacity: 0.9;
     }
 
     #fileInput {
@@ -186,9 +238,18 @@
       display: flex;
       flex-direction: column;
       gap: 8px;
-      max-height: 380px;
+      max-height: 410px;
       overflow-y: auto;
       padding-right: 4px;
+    }
+
+    .playlist::-webkit-scrollbar {
+      width: 5px;
+    }
+
+    .playlist::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 4px;
     }
 
     .playlist li {
@@ -221,7 +282,7 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      max-width: 170px;
+      max-width: 190px;
     }
 
     .song-actions {
@@ -236,11 +297,13 @@
       color: var(--text-muted);
       cursor: pointer;
       border-radius: 6px;
+      flex: none;
     }
 
     .icon-btn:hover {
       color: var(--danger);
       background: rgba(239, 68, 68, 0.1);
+      box-shadow: none;
     }
   </style>
 </head>
@@ -257,20 +320,40 @@
       </div>
 
       <div class="controls-panel">
-        <div class="slider-group">
-          <div class="slider-label">
-            <span>Bass Boost (Low Shelf)</span>
-            <span id="bassValue">0 dB</span>
+        <!-- Seek / Timeline Scrubber -->
+        <div class="seek-group">
+          <input type="range" id="seekSlider" min="0" max="100" value="0" step="0.1" />
+          <div class="time-labels">
+            <span id="currentTime">0:00</span>
+            <span id="totalDuration">0:00</span>
           </div>
-          <input type="range" id="bassSlider" min="0" max="18" value="0" step="1" />
         </div>
 
-        <div class="slider-group">
-          <div class="slider-label">
-            <span>Speed / Tempo</span>
-            <span id="speedValue">1.0x</span>
+        <!-- Audio Controls Grid -->
+        <div class="slider-grid">
+          <div class="slider-group">
+            <div class="slider-label">
+              <span>Bass Boost</span>
+              <span id="bassValue">0 dB</span>
+            </div>
+            <input type="range" id="bassSlider" min="0" max="20" value="0" step="1" />
           </div>
-          <input type="range" id="speedSlider" min="0.5" max="2.0" value="1.0" step="0.05" />
+
+          <div class="slider-group">
+            <div class="slider-label">
+              <span>Pitch / Speed</span>
+              <span id="speedValue">1.00x</span>
+            </div>
+            <input type="range" id="speedSlider" min="0.5" max="1.75" value="1.0" step="0.05" />
+          </div>
+
+          <div class="slider-group full-width">
+            <div class="slider-label">
+              <span>Volume <button class="mute-toggle" id="muteBtn" title="Mute/Unmute">(Mute)</button></span>
+              <span id="volumeValue">80%</span>
+            </div>
+            <input type="range" id="volumeSlider" min="0" max="1" value="0.8" step="0.01" />
+          </div>
         </div>
 
         <div class="btn-row">
