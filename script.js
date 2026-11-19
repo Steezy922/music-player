@@ -1,8 +1,15 @@
 const audioEl = new Audio();
+audioEl.crossOrigin = "anonymous";
 audioEl.volume = 0.8;
 audioEl.preservesPitch = false;
 audioEl.mozPreservesPitch = false;
 audioEl.webkitPreservesPitch = false;
+
+// Fallback list if running locally via file:// instead of GitHub Pages
+const fallbackRapFiles = [
+  // Add filenames here ONLY if testing offline without GitHub Pages, e.g.:
+  // "track1.mp3", "track2.mp3"
+];
 
 let playlistData = [];
 let currentIndex = 0;
@@ -40,6 +47,52 @@ const nowPlayingTitle = document.getElementById("nowPlayingTitle");
 const nowPlayingSub = document.getElementById("nowPlayingSub");
 const fileInput = document.getElementById("fileInput");
 
+// Automatically fetch every audio file inside the "rap" folder on GitHub
+async function loadRapFolder() {
+  const audioExtensions = /\.(mp3|wav|ogg|m4a|flac|aac)$/i;
+  const host = window.location.hostname;
+  const pathParts = window.location.pathname.split("/").filter(Boolean);
+
+  // Detect GitHub Pages URL (username.github.io/repo-name)
+  if (host.endsWith("github.io") && pathParts.length > 0) {
+    const owner = host.split(".")[0];
+    const repo = pathParts[0];
+    try {
+      const res = await fetch(`https://github.com{owner}/${repo}/contents/rap`);
+      if (res.ok) {
+        const files = await res.json();
+        files.forEach((file) => {
+          if (file.type === "file" && audioExtensions.test(file.name)) {
+            playlistData.push({
+              name: file.name,
+              url: `rap/${encodeURIComponent(file.name)}`,
+              isObjectUrl: false
+            });
+          }
+        });
+      }
+    } catch (err) {
+      console.warn("Could not auto-fetch from GitHub API, using fallback list.", err);
+    }
+  }
+
+  // Use fallback list if offline or not on GitHub Pages
+  if (playlistData.length === 0 && fallbackRapFiles.length > 0) {
+    fallbackRapFiles.forEach((fileName) => {
+      playlistData.push({
+        name: fileName,
+        url: `rap/${encodeURIComponent(fileName)}`,
+        isObjectUrl: false
+      });
+    });
+  }
+
+  if (playlistData.length > 0) {
+    nowPlayingTitle.textContent = playlistData[0].name;
+    nowPlayingSub.textContent = `Track 1 of ${playlistData.length} • Ready to play`;
+  }
+  renderPlaylist();
+}
 function formatTime(seconds) {
   if (isNaN(seconds) || !isFinite(seconds)) return "0:00";
   const mins = Math.floor(seconds / 60);
@@ -90,6 +143,7 @@ function renderPlaylist() {
       <span class="song-title" title="${track.name}">${index + 1}. ${track.name}</span>
       <button class="icon-btn delete-btn" title="Delete Song">✕</button>
     `;
+
     li.addEventListener("click", (e) => {
       if (e.target.classList.contains("delete-btn")) return;
       playTrack(index);
@@ -140,315 +194,20 @@ function playTrack(index) {
   nowPlayingSub.textContent = `Track ${currentIndex + 1} of ${playlistData.length}`;
   renderPlaylist();
 }
-
-function resetPlayerUI() {
-  audioEl.pause();
-  audioEl.removeAttribute("src");
-  audioEl.load();
-  seekSlider.value = 0;
-  seekSlider.max = 100;
-  currentTimeEl.textContent = "0:00";
-  totalDurationEl.textContent = "0:00";
-  nowPlayingTitle.textContent = "No Track Loaded";
-  nowPlayingSub.textContent = 'Click "+ Add Songs" to load local audio';
-  playPauseBtn.textContent = "Play";
-  currentIndex = 0;
-}
-
-function deleteTrack(index) {
-  URL.revokeObjectURL(playlistData[index].url);
-  playlistData.splice(index, 1);
-  if (playlistData.length === 0) {
-    resetPlayerUI();
-  } else if (index === currentIndex) {
-    currentIndex = Math.min(index, playlistData.length - 1);
-    playTrack(currentIndex);
-  } else if (index < currentIndex) {
-    currentIndex--;
-  }
-  renderPlaylist();
-}
-
-clearAllBtn.addEventListener("click", () => {
-  playlistData.forEach((t) => URL.revokeObjectURL(t.url));
-  playlistData = [];
-  resetPlayerUI();
-  renderPlaylist();
-});
-
-playPauseBtn.addEventListener("click", () => {
-  if (playlistData.length === 0) return;
-  initAudioContext();
-  if (audioCtx.state === "suspended") audioCtx.resume();
-
-  if (audioEl.paused) {
-    if (!audioEl.src) playTrack(currentIndex);
-    else {
-      audioEl.play();
-      playPauseBtn.textContent = "Pause";
-    }
-  } else {
-    audioEl.pause();
-    playPauseBtn.textContent = "Play";
-  }
-});
-prevBtn.addEventListener("click", () => {
-  if (playlistData.length === 0) return;
-  if (audioEl.currentTime > 3) {
-    audioEl.currentTime = 0;
-    return;
-  }
-  currentIndex = (currentIndex - 1 + playlistData.length) % playlistData.length;
-  playTrack(currentIndex);
-});
-
-nextBtn.addEventListener("click", () => {
-  if (playlistData.length === 0) return;
-  if (isShuffle) playRandomTrack();
-  else {
-    currentIndex = (currentIndex + 1) % playlistData.length;
-    playTrack(currentIndex);
-  }
-});
-
-// Seeking & Timeline Scrubber
-audioEl.addEventListener("loadedmetadata", () => {
-  if (isFinite(audioEl.duration)) {
-    seekSlider.max = audioEl.duration;
-    totalDurationEl.textContent = formatTime(audioEl.duration);
-  }
-});
-
-audioEl.addEventListener("durationchange", () => {
-  if (isFinite(audioEl.duration)) {
-    seekSlider.max = audioEl.duration;
-    totalDurationEl.textContent = formatTime(audioEl.duration);
-  }
-});
-
-audioEl.addEventListener("timeupdate", () => {
-  if (!isSeeking && isFinite(audioEl.duration)) {
-    seekSlider.max = audioEl.duration;
-    seekSlider.value = audioEl.currentTime;
-    currentTimeEl.textContent = formatTime(audioEl.currentTime);
-  }
-});
-
-seekSlider.addEventListener("pointerdown", () => {
-  isSeeking = true;
-});
-
-seekSlider.addEventListener("input", () => {
-  const targetTime = parseFloat(seekSlider.value);
-  currentTimeEl.textContent = formatTime(targetTime);
-  if (isFinite(audioEl.duration)) {
-    audioEl.currentTime = targetTime;
-  }
-});
-
-window.addEventListener("pointerup", () => {
-  if (isSeeking) {
-    isSeeking = false;
-  }
-});
-
-// Volume & Mute Controls
-volumeSlider.addEventListener("input", (e) => {
-  const vol = parseFloat(e.target.value);
-  audioEl.volume = vol;
-  volumeValue.textContent = `${Math.round(vol * 100)}%`;
-  muteBtn.textContent = vol === 0 ? "(Unmute)" : "(Mute)";
-});
-
-muteBtn.addEventListener("click", () => {
-  if (audioEl.volume > 0) {
-    previousVolume = audioEl.volume;
-    audioEl.volume = 0;
-    volumeSlider.value = 0;
-    volumeValue.textContent = "0%";
-    muteBtn.textContent = "(Unmute)";
-  } else {
-    audioEl.volume = previousVolume || 0.8;
-    volumeSlider.value = audioEl.volume;
-    volumeValue.textContent = `${Math.round(audioEl.volume * 100)}%`;
-    muteBtn.textContent = "(Mute)";
-  }
-});
-
-audioEl.addEventListener("ended", () => {
-  if (loopMode === "one") {
-    audioEl.currentTime = 0;
-    audioEl.play();
-  } else if (isShuffle) {
-    playRandomTrack();
-  } else if (currentIndex < playlistData.length - 1) {
-    playTrack(currentIndex + 1);
-  } else if (loopMode === "all") {
-    playTrack(0);
-  } else {
-    playPauseBtn.textContent = "Play";
-  }
-});
-shuffleBtn.addEventListener("click", () => {
-  isShuffle = !isShuffle;
-  shuffleBtn.classList.toggle("active", isShuffle);
-  shuffleBtn.textContent = `Shuffle: ${isShuffle ? "On" : "Off"}`;
-});
-
-loopBtn.addEventListener("click", () => {
-  if (loopMode === "all") {
-    loopMode = "one";
-    loopBtn.textContent = "Loop: One";
-  } else if (loopMode === "one") {
-    loopMode = "off";
-    loopBtn.textContent = "Loop: Off";
-  } else {
-    loopMode = "all";
-    loopBtn.textContent = "Loop: All";
-  }
-});
-
-function playRandomTrack() {
-  if (playlistData.length === 0) return;
-  let nextIdx = Math.floor(Math.random() * playlistData.length);
-  if (playlistData.length > 1 && nextIdx === currentIndex) {
-    nextIdx = (nextIdx + 1) % playlistData.length;
-  }
-  playTrack(nextIdx);
-}
-
-randomBtn.addEventListener("click", playRandomTrack);
-
-bassSlider.addEventListener("input", (e) => {
-  const val = parseFloat(e.target.value);
-  bassValue.textContent = `${val} dB`;
-  if (bassFilter) bassFilter.gain.setValueAtTime(val, audioCtx.currentTime);
-});
-
-speedSlider.addEventListener("input", (e) => {
-  const val = parseFloat(e.target.value);
-  speedValue.textContent = `${val.toFixed(2)}x`;
-  audioEl.playbackRate = val;
-});
-
-resetSpeedBtn.addEventListener("click", () => {
-  speedSlider.value = 1.0;
-  speedValue.textContent = "1.00x";
-  audioEl.playbackRate = 1.0;
-});
-
 fileInput.addEventListener("change", (e) => {
   const files = Array.from(e.target.files);
   const wasEmpty = playlistData.length === 0;
   files.forEach((file) => {
-    playlistData.push({ name: file.name, url: URL.createObjectURL(file) });
+    playlistData.push({
+      name: file.name,
+      url: URL.createObjectURL(file),
+      isObjectUrl: true
+    });
   });
   renderPlaylist();
   if (wasEmpty && playlistData.length > 0) playTrack(0);
 });
 
-// Keyboard Shortcuts (Space = Play/Pause, Arrows = Seek +/- 5s)
-window.addEventListener("keydown", (e) => {
-  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
-  if (e.code === "Space") {
-    e.preventDefault();
-    playPauseBtn.click();
-  } else if (e.code === "ArrowRight" && isFinite(audioEl.duration)) {
-    audioEl.currentTime = Math.min(audioEl.duration, audioEl.currentTime + 5);
-  } else if (e.code === "ArrowLeft" && isFinite(audioEl.duration)) {
-    audioEl.currentTime = Math.max(0, audioEl.currentTime - 5);
-  }
-});
-
-// Multi-Mode Visualizer Engine
-const canvas = document.getElementById("visualizer");
-const canvasCtx = canvas.getContext("2d");
-const specCanvas = document.createElement("canvas");
-const specCtx = specCanvas.getContext("2d");
-
-function resizeCanvases() {
-  if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
-    canvas.width = canvas.clientWidth;
-    canvas.height = canvas.clientHeight;
-    specCanvas.width = canvas.width;
-    specCanvas.height = canvas.height;
-    specCtx.fillStyle = "#10121a";
-    specCtx.fillRect(0, 0, specCanvas.width, specCanvas.height);
-  }
-}
-
-function drawVisualizer() {
-  requestAnimationFrame(drawVisualizer);
-  resizeCanvases();
-  const mode = vizModeSelect.value;
-
-  if (!analyser) {
-    canvasCtx.fillStyle = "#10121a";
-    canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
-    return;
-  }
-
-  if (mode === "bars") {
-    canvasCtx.fillStyle = "#10121a";
-    canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
-    analyser.getByteFrequencyData(freqData);
-    const barWidth = (canvas.width / freqData.length) * 2.2;
-    let x = 0;
-    for (let i = 0; i < freqData.length; i++) {
-      const barHeight = (freqData[i] / 255) * canvas.height;
-      const grad = canvasCtx.createLinearGradient(0, canvas.height - barHeight, 0, canvas.height);
-      grad.addColorStop(0, "#b388ff");
-      grad.addColorStop(1, "#7c4dff");
-      canvasCtx.fillStyle = grad;
-      canvasCtx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
-      x += barWidth + 2;
-    }
-  } else if (mode === "mirror") {
-    canvasCtx.fillStyle = "#10121a";
-    canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
-    analyser.getByteFrequencyData(freqData);
-    const barWidth = (canvas.width / freqData.length) * 2.2;
-    const midY = canvas.height / 2;
-    let x = 0;
-    for (let i = 0; i < freqData.length; i++) {
-      const halfH = ((freqData[i] / 255) * canvas.height) / 2;
-      canvasCtx.fillStyle = `hsl(${255 + (freqData[i] / 255) * 45}, 85%, 65%)`;
-      canvasCtx.fillRect(x, midY - halfH, barWidth, halfH * 2);
-      x += barWidth + 2;
-    }
-  } else if (mode === "wave") {
-    canvasCtx.fillStyle = "#10121a";
-    canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
-    analyser.getByteTimeDomainData(waveData);
-    canvasCtx.lineWidth = 2.5;
-    canvasCtx.strokeStyle = "#b388ff";
-    canvasCtx.beginPath();
-    const sliceWidth = canvas.width / waveData.length;
-    let x = 0;
-    for (let i = 0; i < waveData.length; i++) {
-      const v = waveData[i] / 128.0;
-      const y = (v * canvas.height) / 2;
-      if (i === 0) canvasCtx.moveTo(x, y);
-      else canvasCtx.lineTo(x, y);
-      x += sliceWidth;
-    }
-    canvasCtx.lineTo(canvas.width, canvas.height / 2);
-    canvasCtx.stroke();
-  } else if (mode === "spectrogram") {
-    analyser.getByteFrequencyData(freqData);
-    specCtx.drawImage(specCanvas, -2, 0);
-    const sliceH = canvas.height / freqData.length;
-    for (let i = 0; i < freqData.length; i++) {
-      const val = freqData[i];
-      const hue = 275 - (val / 255) * 240;
-      const light = (val / 255) * 60;
-      specCtx.fillStyle = `hsl(${hue}, 90%, ${light}%)`;
-      const y = canvas.height - (i + 1) * sliceH;
-      specCtx.fillRect(specCanvas.width - 2, y, 2, Math.ceil(sliceH));
-    }
-    canvasCtx.drawImage(specCanvas, 0, 0);
-  }
-}
-
-renderPlaylist();
+// ... (keep the rest of Part 4 the same, then end with:)
+loadRapFolder();
 drawVisualizer();
