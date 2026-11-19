@@ -1,6 +1,6 @@
 const audioEl = new Audio();
 audioEl.crossOrigin = "anonymous";
-audioEl.volume = 0.8;
+audioEl.volume = 1.0; // Keep native element at 100%; GainNode handles 0% to 400%+
 audioEl.preservesPitch = false;
 audioEl.mozPreservesPitch = false;
 audioEl.webkitPreservesPitch = false;
@@ -28,11 +28,11 @@ let playlistData = defaultRapSongs.map((fileName) => ({
 
 let currentIndex = 0;
 let isShuffle = false;
-let loopMode = "all"; // "all" | "one" | "off"
+let loopMode = "all";
 let isSeeking = false;
-let previousVolume = 0.8;
+let previousVolume = 1.0;
 
-let audioCtx, sourceNode, bassFilter, compressor, analyser, freqData, waveData;
+let audioCtx, sourceNode, subBassFilter, punchBassFilter, gainNode, limiter, analyser, freqData, waveData;
 
 const playlistEl = document.getElementById("playlist");
 const playPauseBtn = document.getElementById("playPauseBtn");
@@ -76,17 +76,30 @@ function initAudioContext() {
 
   sourceNode = audioCtx.createMediaElementSource(audioEl);
 
-  bassFilter = audioCtx.createBiquadFilter();
-  bassFilter.type = "lowshelf";
-  bassFilter.frequency.value = 100;
-  bassFilter.gain.value = parseFloat(bassSlider.value);
+  // Stage 1: Deep Sub-Bass Shelf (85 Hz)
+  subBassFilter = audioCtx.createBiquadFilter();
+  subBassFilter.type = "lowshelf";
+  subBassFilter.frequency.value = 85;
+  subBassFilter.gain.value = parseFloat(bassSlider.value);
 
-  compressor = audioCtx.createDynamicsCompressor();
-  compressor.threshold.value = -12;
-  compressor.knee.value = 15;
-  compressor.ratio.value = 8;
-  compressor.attack.value = 0.005;
-  compressor.release.value = 0.15;
+  // Stage 2: Punchy Kick/808 Boost (130 Hz)
+  punchBassFilter = audioCtx.createBiquadFilter();
+  punchBassFilter.type = "peaking";
+  punchBassFilter.frequency.value = 130;
+  punchBassFilter.Q.value = 1.1;
+  punchBassFilter.gain.value = parseFloat(bassSlider.value) * 0.65;
+
+  // Pre-Amp Gain Node (allows boosting volume up to 400%+)
+  gainNode = audioCtx.createGain();
+  gainNode.gain.value = parseFloat(volumeSlider.value);
+
+  // High-threshold brickwall limiter so bass hits hard without harsh clipping
+  limiter = audioCtx.createDynamicsCompressor();
+  limiter.threshold.value = -3;
+  limiter.knee.value = 6;
+  limiter.ratio.value = 12;
+  limiter.attack.value = 0.002;
+  limiter.release.value = 0.1;
 
   analyser = audioCtx.createAnalyser();
   analyser.fftSize = 256;
@@ -94,9 +107,11 @@ function initAudioContext() {
   freqData = new Uint8Array(bufferLength);
   waveData = new Uint8Array(bufferLength);
 
-  sourceNode.connect(bassFilter);
-  bassFilter.connect(compressor);
-  compressor.connect(analyser);
+  sourceNode.connect(subBassFilter);
+  subBassFilter.connect(punchBassFilter);
+  punchBassFilter.connect(gainNode);
+  gainNode.connect(limiter);
+  limiter.connect(analyser);
   analyser.connect(audioCtx.destination);
 }
 function renderPlaylist() {
@@ -257,7 +272,6 @@ nextBtn.addEventListener("click", () => {
   }
 });
 
-// Seeking & Timeline Scrubber
 audioEl.addEventListener("loadedmetadata", () => {
   if (isFinite(audioEl.duration)) {
     seekSlider.max = audioEl.duration;
@@ -298,26 +312,30 @@ window.addEventListener("pointerup", () => {
   }
 });
 
-// Volume & Mute Controls
-volumeSlider.addEventListener("input", (e) => {
-  const vol = parseFloat(e.target.value);
-  audioEl.volume = vol;
+// Pre-Amp Volume & Mute Controls (0% to 400%)
+function setPreAmpVolume(vol) {
   volumeValue.textContent = `${Math.round(vol * 100)}%`;
   muteBtn.textContent = vol === 0 ? "(Unmute)" : "(Mute)";
+  if (gainNode) {
+    gainNode.gain.setValueAtTime(vol, audioCtx.currentTime);
+  }
+}
+
+volumeSlider.addEventListener("input", (e) => {
+  const vol = parseFloat(e.target.value);
+  setPreAmpVolume(vol);
 });
 
 muteBtn.addEventListener("click", () => {
-  if (audioEl.volume > 0) {
-    previousVolume = audioEl.volume;
-    audioEl.volume = 0;
+  const currentVol = parseFloat(volumeSlider.value);
+  if (currentVol > 0) {
+    previousVolume = currentVol;
     volumeSlider.value = 0;
-    volumeValue.textContent = "0%";
-    muteBtn.textContent = "(Unmute)";
+    setPreAmpVolume(0);
   } else {
-    audioEl.volume = previousVolume || 0.8;
-    volumeSlider.value = audioEl.volume;
-    volumeValue.textContent = `${Math.round(audioEl.volume * 100)}%`;
-    muteBtn.textContent = "(Mute)";
+    const restoreVol = previousVolume || 1.0;
+    volumeSlider.value = restoreVol;
+    setPreAmpVolume(restoreVol);
   }
 });
 audioEl.addEventListener("ended", () => {
@@ -365,10 +383,14 @@ function playRandomTrack() {
 
 randomBtn.addEventListener("click", playRandomTrack);
 
+// Dual-Stage Bass Boost
 bassSlider.addEventListener("input", (e) => {
   const val = parseFloat(e.target.value);
   bassValue.textContent = `${val} dB`;
-  if (bassFilter) bassFilter.gain.setValueAtTime(val, audioCtx.currentTime);
+  if (subBassFilter && punchBassFilter) {
+    subBassFilter.gain.setValueAtTime(val, audioCtx.currentTime);
+    punchBassFilter.gain.setValueAtTime(val * 0.65, audioCtx.currentTime);
+  }
 });
 
 speedSlider.addEventListener("input", (e) => {
@@ -397,7 +419,6 @@ fileInput.addEventListener("change", (e) => {
   if (wasEmpty && playlistData.length > 0) playTrack(0);
 });
 
-// Keyboard Shortcuts (Space = Play/Pause, Arrows = Seek +/- 5s)
 window.addEventListener("keydown", (e) => {
   if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
   if (e.code === "Space") {
@@ -500,7 +521,6 @@ function drawVisualizer() {
   }
 }
 
-// Display first track title on load and render queue
 if (playlistData.length > 0) {
   nowPlayingTitle.textContent = playlistData.name;
   nowPlayingSub.textContent = `Track 1 of ${playlistData.length} • Click Play to start`;
