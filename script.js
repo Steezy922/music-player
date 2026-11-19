@@ -42,6 +42,7 @@ const shuffleBtn = document.getElementById("shuffleBtn");
 const loopBtn = document.getElementById("loopBtn");
 const randomBtn = document.getElementById("randomBtn");
 const clearAllBtn = document.getElementById("clearAllBtn");
+const loadExamplesBtn = document.getElementById("loadExamplesBtn");
 const vizModeSelect = document.getElementById("vizModeSelect");
 
 const seekSlider = document.getElementById("seekSlider");
@@ -199,6 +200,26 @@ clearAllBtn.addEventListener("click", () => {
   playlistData = [];
   resetPlayerUI();
   renderPlaylist();
+});
+
+loadExamplesBtn.addEventListener("click", () => {
+  const wasEmpty = playlistData.length === 0;
+  defaultRapSongs.forEach((fileName) => {
+    const url = `rap/${encodeURIComponent(fileName)}`;
+    const alreadyExists = playlistData.some((track) => track.name === fileName && !track.isObjectUrl);
+    if (!alreadyExists) {
+      playlistData.push({
+        name: fileName,
+        url: url,
+        isObjectUrl: false
+      });
+    }
+  });
+  renderPlaylist();
+  if (wasEmpty && playlistData.length > 0) {
+    nowPlayingTitle.textContent = playlistData.name;
+    nowPlayingSub.textContent = `Track 1 of ${playlistData.length} • Click Play to start`;
+  }
 });
 playPauseBtn.addEventListener("click", () => {
   if (playlistData.length === 0) return;
