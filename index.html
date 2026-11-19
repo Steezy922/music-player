@@ -35,17 +35,17 @@
 
     .player-container {
       width: 100%;
-      max-width: 900px;
+      max-width: 920px;
       background: var(--card);
       border-radius: 20px;
       box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
       border: 1px solid rgba(255, 255, 255, 0.08);
       overflow: hidden;
       display: grid;
-      grid-template-columns: 1.2fr 1fr;
+      grid-template-columns: 1.15fr 1fr;
     }
 
-    @media (max-width: 780px) {
+    @media (max-width: 820px) {
       .player-container {
         grid-template-columns: 1fr;
       }
@@ -242,17 +242,36 @@
 
     .header-btns {
       display: flex;
+      align-items: center;
       gap: 6px;
     }
 
     .add-file-label {
       background: var(--accent);
       color: #fff;
-      padding: 6px 12px;
+      padding: 6px 10px;
       border-radius: 8px;
       font-size: 0.75rem;
       cursor: pointer;
       font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .example-btn {
+      background: rgba(124, 77, 255, 0.15);
+      color: #c4b5fd;
+      border: 1px solid rgba(124, 77, 255, 0.35);
+      padding: 6px 10px;
+      border-radius: 8px;
+      font-size: 0.75rem;
+      flex: none;
+      white-space: nowrap;
+    }
+
+    .example-btn:hover {
+      background: var(--accent);
+      color: #fff;
+      box-shadow: none;
     }
 
     .clear-btn {
@@ -314,7 +333,7 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      max-width: 210px;
+      max-width: 220px;
     }
 
     .icon-btn {
@@ -409,6 +428,7 @@
         <h3>Queue & Songs</h3>
         <div class="header-btns">
           <label class="add-file-label" for="fileInput">+ Add Songs</label>
+          <button class="example-btn" id="loadExamplesBtn" title="Load songs from rap folder">Load Examples</button>
           <button class="clear-btn" id="clearAllBtn" title="Remove all songs">Clear</button>
         </div>
         <input type="file" id="fileInput" accept="audio/*" multiple />
