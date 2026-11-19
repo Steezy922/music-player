@@ -7,6 +7,7 @@ audioEl.webkitPreservesPitch = false;
 
 // Fallback list if running locally via file:// instead of GitHub Pages
 const fallbackRapFiles = [
+  "4 LOKO - SMOKEDOPE2016.mp3", "4Raws - EsDeeKid.mp3", "BLEED - SMOKEDOPE2016.mp3", "Back2Back - SMOKEDOPE2016.mp3", "DIRTY 30z - SMOKEDOPE2016.mp3", "Fever - Buckshot.mp3", "Icey Soles - SMOKEDOPE2016.mp3", "Know Dat - SMOKEDOPE2016.mp3", "LV Sandals - EsDeeKid.mp3", "Phantom - EsDeeKid.mp3", "Polo - SMOKEDOPE2016.mp3", "Sleep - SMOKEDOPE2016.mp3"
   // Add filenames here ONLY if testing offline without GitHub Pages, e.g.:
   // "track1.mp3", "track2.mp3"
 ];
